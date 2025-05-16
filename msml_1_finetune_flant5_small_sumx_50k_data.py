@@ -28,6 +28,27 @@ import numpy as np
 from datasets import load_dataset
 from transformers import T5Tokenizer, DataCollatorForSeq2Seq
 from transformers import T5ForConditionalGeneration, Seq2SeqTrainingArguments, Seq2SeqTrainer
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+from evaluate import load  # or use evaluate if newer
+from google.colab import files
+import shutil
+
+import os
+os.environ["WANDB_DISABLED"] = "true"
+
+# Load nltk for texts
+nltk.download("punkt", quiet=True)
+nltk.download("punkt_tab", quiet=True) #
+metric = evaluate.load("rouge")
+
+# Global Parameters
+L_RATE = 3e-4
+BATCH_SIZE = 4
+PER_DEVICE_EVAL_BATCH = 4
+WEIGHT_DECAY = 0.01
+SAVE_TOTAL_LIM = 3
+NUM_EPOCHS = 3
+LOG_STEPS=100
 
 # Load the tokenizer, model, and data collator
 MODEL_NAME = "google/flan-t5-small"
@@ -42,13 +63,10 @@ train_dataset = dataset["train"].select(range(50000)).shuffle(seed=20)
 val_dataset = dataset["validation"].select(range(5000)).shuffle(seed=20)
 test_dataset = dataset["test"].select(range(5000)).shuffle(seed=20)
 
-dataset
-
 # We prefix our tasks with "answer the question"
 prefix = "Give the summary of the article: "
 
 # Define the preprocessing function
-
 def preprocess_function(examples):
    """Add prefix to the sentences, tokenize the text, and set the labels"""
    # The "inputs" are the tokenized answer:
@@ -68,11 +86,6 @@ train_tokenized_dataset = train_dataset.map(preprocess_function, batched=True)
 test_tokenized_dataset = test_dataset.map(preprocess_function, batched=True)
 val_tokenized_dataset = val_dataset.map(preprocess_function, batched=True)
 
-# Load nltk for texts
-nltk.download("punkt", quiet=True)
-nltk.download("punkt_tab", quiet=True) #
-metric = evaluate.load("rouge")
-
 # Define compute metrics funtion to get the rouge score while training and validation
 def compute_metrics(eval_preds):
     preds, labels = eval_preds
@@ -91,17 +104,6 @@ def compute_metrics(eval_preds):
     result = metric.compute(predictions=decoded_preds, references=decoded_labels, use_stemmer=True)
 
     return result
-
-# Global Parameters
-L_RATE = 3e-4
-BATCH_SIZE = 4
-PER_DEVICE_EVAL_BATCH = 4
-WEIGHT_DECAY = 0.01
-SAVE_TOTAL_LIM = 3
-NUM_EPOCHS = 3
-LOG_STEPS=100
-import os
-os.environ["WANDB_DISABLED"] = "true"
 
 # Set up training arguments
 training_args = Seq2SeqTrainingArguments(
@@ -140,10 +142,6 @@ last_checkpoint = "./flant-t5-finetuned-cnn-dailymail_50k/checkpoint-36500"
 finetuned_model = T5ForConditionalGeneration.from_pretrained(last_checkpoint)
 tokenizer = T5Tokenizer.from_pretrained(last_checkpoint)
 
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
-from evaluate import load  # or use evaluate if newer
-import nltk
-
 # Fine-tuned model
 finetuned_model = AutoModelForSeq2SeqLM.from_pretrained("./flant-t5-finetuned-cnn-dailymail_50k/checkpoint-37500")
 finetuned_tokenizer = AutoTokenizer.from_pretrained("./flant-t5-finetuned-cnn-dailymail_50k/checkpoint-37500")
@@ -170,59 +168,7 @@ original_preds = generate_summaries(original_model, original_tokenizer, val_data
 finetuned_preds = generate_summaries(finetuned_model, finetuned_tokenizer, val_dataset["article"])
 references = val_dataset["highlights"]
 
-# Compute rouge scores for original and finetuned model for all samples from val datasets
-from evaluate import load  # Or `load_metric` if using older versions
-
-rouge = load("rouge")
-
-original_score = rouge.compute(predictions=original_preds, references=references)
-finetuned_score = rouge.compute(predictions=finetuned_preds, references=references)
-
-# Compare the model metrics between fine-tuned and original model
-print("Original Model ROUGE Scores:")
-for k, v in original_score.items():
-    print(f"{k}: {v:.4f}")
-
-print("\nFine-Tuned Model ROUGE Scores:")
-for k, v in finetuned_score.items():
-    print(f"{k}: {v:.4f}")
-
-# Combine into a DataFrame
-comparison_df = pd.DataFrame({
-    "Metric": list(original_score.keys()),
-    "Original_Model": list(original_score.values()),
-    "FineTuned_Model": list(finetuned_score.values())
-})
-
-# Display the DataFrame
-print(comparison_df)
-
-# Save as CSV
-comparison_df.to_csv("rouge_comparison.csv", index=False)
-
-# Save as JSON
-comparison_df.to_json("rouge_comparison.json", orient="records", lines=True)
-
-# Generate master files of generated summaries from original and fine-tuned model
-import pandas as pd
-import torch
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
-from datasets import load_dataset
-from evaluate import load as load_metric
-import nltk
-nltk.download("punkt")
-
-
-# Generate summaries
-def generate(model, tokenizer, inputs, max_input_length=512, max_target_length=128):
-    inputs_tokenized = tokenizer(inputs, return_tensors="pt", padding=True, truncation=True, max_length=max_input_length).to(model.device)
-    with torch.no_grad():
-        outputs = model.generate(input_ids=inputs_tokenized["input_ids"],
-                                 attention_mask=inputs_tokenized["attention_mask"],
-                                 max_length=max_target_length)
-    return tokenizer.batch_decode(outputs, skip_special_tokens=True)
-
-# Compute ROUGE scores
+# Compute Rouge
 rouge = load_metric("rouge")
 original_scores = rouge.compute(predictions=original_preds, references=references, use_stemmer=True)
 finetuned_scores = rouge.compute(predictions=finetuned_preds, references=references, use_stemmer=True)
@@ -234,21 +180,8 @@ df = pd.DataFrame({
     "reference_summary": references
 })
 
-# Add summary-level scores
-for metric, score in original_scores.items():
-    df[f"original_{metric}"] = score
-for metric, score in finetuned_scores.items():
-    df[f"finetuned_{metric}"] = score
-
-# Show first few rows
-print(df.head())
-
 # save to CSV
-df.to_csv("model_comparison_finetune_20k_results.csv", index=False)
-
-# Download the model for reference
-
-import shutil
+df.to_csv("model_comparison_finetune_50k_results.csv", index=False)
 
 # Path to your model checkpoint directory
 model_dir = "./flant-t5-finetuned-cnn-dailymail_50k/checkpoint-37500"  # replace with your actual checkpoint
@@ -259,5 +192,4 @@ zip_file = "finetuned_model_cnn_news_50k"
 # Zip the directory
 shutil.make_archive("finetuned_model_cnn_news_50k", 'zip', model_dir)
 
-from google.colab import files
 files.download("finetuned_model_cnn_news_50k.zip")
