@@ -13,7 +13,6 @@ This project demonstrates fine-tuning and parameter-efficient fine-tuning (PEFT)
 
 - `flan_t5_peft_lora.py`: Main script for PEFT with LoRA.
 - `msml_1_finetune_flant5_small_sumx_50k_data.py`: Script for standard fine-tuning.
-- `rouge_comparison_finetune_20k.csv`: ROUGE metric comparison between original and fine-tuned models.
 
 ## Example ROUGE Comparison
 
